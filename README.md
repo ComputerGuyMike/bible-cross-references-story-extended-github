@@ -29,7 +29,13 @@ This is the same tool as the plain version, with more links from the `bible-conn
 - **Ranges:** where a connection covers several passages on both sides, they are lined up by position, not linked pair by pair.
 - **Same passages as the plain version,** so path codes and journey backups work in both. Journeys in this version are saved separately.
 
-**Every new link is marked `proposed`.** They were reviewed by an AI assistant (Claude), not by a person, so expect some that a careful reader would drop, mostly ritual and genealogical repetition. There is not yet a way to dispute a link from inside the tool.
+**Every new link is marked `proposed`.** They were reviewed by an AI assistant (Claude), not by a person, so expect some that a careful reader would drop, mostly ritual and genealogical repetition.
+
+## Disagreeing with a link
+
+Every step has a **⚑ Disagree with a link, or suggest one** button (and a small ⚑ on each next-step card). It opens a short form: pick the link, say what is wrong (not a real link, wrong type, wrong direction, wrong passage), give your reason, or switch to "Suggest a missing link". **Open on GitHub** opens a new issue on this repository with the report filled in, including the link's id when the link comes from the bible-connections dataset. **Copy report** copies the same text if you would rather send it another way. Nothing is sent from the page: GitHub asks you to sign in and you press Submit there.
+
+Only links from the bible-connections dataset can be changed by this project. Cross-references, UBS parallels, events, people and places come from other projects; reports about them are welcome and will be passed on.
 
 ## Known limits
 

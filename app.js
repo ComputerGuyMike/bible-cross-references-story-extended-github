@@ -382,7 +382,8 @@ function renderMain() {
     <div class="ptext">${passageHtml(cur)}</div>
     <div style="font-size:12px;color:var(--faint);margin-top:6px">Underlined names and places are clickable: <span class="ent p">person</span> <span class="ent l">place</span></div>${popHtml(cur)}
     <details class="notebox"${j.nodes[j.cur].note ? ' open' : ''}><summary>${j.nodes[j.cur].note ? 'Your note on this step' : 'Add a note to this step'}</summary>
-    <textarea id="stepnote" rows="3" placeholder="Why does this step matter? Notes are saved with the journey.">${esc(j.nodes[j.cur].note || '')}</textarea></details></div>`;
+    <textarea id="stepnote" rows="3" placeholder="Why does this step matter? Notes are saved with the journey.">${esc(j.nodes[j.cur].note || '')}</textarea></details>
+    <div style="margin-top:10px"><button class="btn" data-act="report" title="Report a link you think is wrong, or one that is missing">⚑ Disagree with a link, or suggest one</button></div></div>`;
 
   h += `<div class="flowhead"><b>Where next?</b><span>${arr.length ? `showing ${shown.length} of ${arr.length}` : ''}</span></div>`;
   h += '<div class="flow" id="flow"><svg id="links"></svg>';
@@ -390,7 +391,7 @@ function renderMain() {
   if (!shown.length) h += `<div class="empty">No further links for this direction${ui.scope !== 'any' ? ' and scope' : ''}. Try <b>All links</b>, widen the scope, or go back a step.</div>`;
   shown.forEach((o, idx) => {
     const col = COLORS[o.primary];
-    h += `<button class="opt" style="--c:${col}" data-act="step" data-o="${idx}" data-c="${col}"><b>${esc(pLabel(o.pid))}</b>
+    h += `<button class="opt" style="--c:${col}" data-act="step" data-o="${idx}" data-c="${col}"><span class="flag" role="button" data-act="report" data-o="${idx}" title="Disagree with this link, or suggest one" aria-label="Disagree with this link">⚑</span><b>${esc(pLabel(o.pid))}</b>
       <span class="why">${o.types.slice(0, 3).map(t => `<i style="background:${COLORS[t]}"></i>`).join('')}${esc(reasonText(o))}</span><span class="snip">${esc(snippet(o.pid))}</span></button>`;
     h += `<div class="stub">${o.next.length ? o.next.map((n, k) => `<button data-act="hop2" data-o="${idx}" data-k="${k}" title="${esc(reasonText(n))}">${esc(pLabel(n.pid))}</button>`).join('') + (o.further ? `<span>+${o.further} further</span>` : '') : '<span>end of this thread</span>'}</div>`;
   });
@@ -479,6 +480,77 @@ function begin(pid, via, entity) {
   closePicker(); sync();
 }
 
+/* ======================================================= disputes (extended data) */
+// "Disagree or suggest" opens a pre-filled new issue on GitHub. Nothing is sent from this page: the reader signs in to
+// GitHub and presses Submit there, or copies the report text and sends it another way.
+const ISSUES_URL = 'https://github.com/ComputerGuyMike/bible-cross-references-story-extended-github/issues/new';
+const VERDICTS = [
+  ['not-a-link', 'This is not a real quotation, echo or parallel'],
+  ['wrong-type', 'Wrong type (for example an echo that is really a quotation)'],
+  ['wrong-direction', 'Wrong direction (which passage quotes which)'],
+  ['wrong-passage', 'Right idea, wrong passage or verses'],
+  ['other', 'Something else']];
+const TYPE_NAME = { quote: 'quotation/echo', parallel: 'parallel', xref: 'cross-reference', event: 'same story', person: 'shared person', place: 'shared place' };
+let rep = null;
+const connInfo = (a, b) => (B.cids && B.cids[Math.min(a, b) + ':' + Math.max(a, b)]) || [];
+
+function repSource(o) {
+  const ids = connInfo(rep.cur, o.pid);
+  if (ids.length) return { ids, text: `This link comes from the bible-connections dataset: ${ids.map(c => `${c[0]} (${c[1]}, ${c[2]} confidence)`).join('; ')}. A report here can change it.` };
+  return { ids, text: `This ${o.types.map(t => TYPE_NAME[t]).join(' / ')} link comes from other data (UBS Parallel Passages, OpenBible, a quotation list or Theographic). This project does not control it, but a report is still welcome and will be passed on.` };
+}
+function reportText() {
+  const meta = `Tool: ${B.build || 'story'}, ${B.P.length} passages`;
+  if (rep.mode === 'missing') {
+    return { title: `Missing link: ${rep.from || '…'} ↔ ${rep.to || '…'}`,
+      body: `**Suggested link**\n- From: ${rep.from || '…'}\n- To: ${rep.to || '…'}\n\n**Why they are connected** (quote the words, give a source):\n${rep.reason || ''}\n\n---\n${meta}\n` };
+  }
+  const o = rep.opts[rep.sel]; if (!o) return { title: 'Link report', body: rep.reason || '' };
+  const src = repSource(o), verdict = VERDICTS.find(v => v[0] === rep.verdict)[1];
+  return { title: `Dispute: ${pLabel(rep.cur)} ↔ ${pLabel(o.pid)}`,
+    body: `**Link in dispute**\n- Passages: ${pLabel(rep.cur)} ↔ ${pLabel(o.pid)}\n- Shown as: ${reasonText(o)} (${o.types.map(t => TYPE_NAME[t]).join(', ')})\n- Connection id: ${src.ids.length ? src.ids.map(c => '`' + c[0] + '`').join(', ') : 'none (this link is from other data)'}\n\n**What is wrong**\n${verdict}\n\n**Why** (quote the words, give a source):\n${rep.reason || ''}\n\n---\n${meta}\n` };
+}
+function reportUrl() {
+  const r = reportText();
+  let url = `${ISSUES_URL}?title=${encodeURIComponent(r.title)}&body=${encodeURIComponent(r.body)}`;
+  if (url.length > 7500) url = `${ISSUES_URL}?title=${encodeURIComponent(r.title)}&body=${encodeURIComponent(r.body.slice(0, 2500) + '\n[shortened: please paste the rest of your reason here]')}`;
+  return url;
+}
+function openReport(optIdx) {
+  const cur = J() ? J().nodes[J().cur].pid : null; if (cur == null) return;
+  rep = { cur, opts: lastOpts.slice(), sel: optIdx || 0, mode: lastOpts.length ? 'dispute' : 'missing', verdict: 'not-a-link', reason: '', from: pLabel(cur), to: '' };
+  $('#overlay').classList.add('open'); renderReport();
+}
+function updateReport() {
+  const o = rep.mode === 'dispute' ? rep.opts[rep.sel] : null;
+  const s = $('#rp-src'); if (s && o) s.textContent = repSource(o).text;
+  const p = $('#rp-preview'); if (p) p.textContent = reportText().title + '\n\n' + reportText().body;
+}
+function renderReport() {
+  const dis = rep.mode === 'dispute';
+  $('#picker').innerHTML = `<h2>Disagree or suggest</h2>
+    <div class="seg" style="margin:6px 0 10px"><button class="${dis ? 'on' : ''}" data-act="rp-mode" data-m="dispute">Dispute a link</button><button class="${dis ? '' : 'on'}" data-act="rp-mode" data-m="missing">Suggest a missing link</button></div>
+    ${dis ? `<label class="rplab">Which link from ${esc(pLabel(rep.cur))}?</label>
+      <select id="rp-link" class="rpin">${rep.opts.map((o, i) => `<option value="${i}"${i === rep.sel ? ' selected' : ''}>${esc(pLabel(o.pid))} — ${esc(reasonText(o))}</option>`).join('')}</select>
+      <div id="rp-src" class="rpnote"></div>
+      <label class="rplab">What is wrong?</label>
+      <select id="rp-verdict" class="rpin">${VERDICTS.map(v => `<option value="${v[0]}"${v[0] === rep.verdict ? ' selected' : ''}>${esc(v[1])}</option>`).join('')}</select>`
+    : `<label class="rplab">From passage</label><input id="rp-from" class="rpin" value="${esc(rep.from)}">
+      <label class="rplab">To passage (for example “Isaiah 53:4–5”)</label><input id="rp-to" class="rpin" value="${esc(rep.to)}" placeholder="Book chapter:verse">`}
+    <label class="rplab">Why? Quote the words or give a source. A rejection or an addition needs evidence.</label>
+    <textarea id="rp-reason" rows="4" class="rpin" style="font:inherit">${esc(rep.reason)}</textarea>
+    <details class="rpnote"><summary>Preview the report</summary><pre id="rp-preview" style="white-space:pre-wrap;margin:6px 0 0;font:12px/1.4 ui-monospace,Menlo,monospace"></pre></details>
+    <div class="btnrow" style="margin:10px 0 4px"><button class="btn primary" data-act="rp-open">Open on GitHub</button><button class="btn" data-act="rp-copy">Copy report</button><button class="btn" data-act="closeov">Cancel</button></div>
+    <div class="rpnote">GitHub asks you to sign in. Nothing is sent until you press Submit there.</div>`;
+  const on = (id, f) => { const e = $(id); if (e) e.oninput = e.onchange = f; };
+  on('#rp-link', e => { rep.sel = +e.target.value; updateReport(); });
+  on('#rp-verdict', e => { rep.verdict = e.target.value; updateReport(); });
+  on('#rp-from', e => { rep.from = e.target.value; updateReport(); });
+  on('#rp-to', e => { rep.to = e.target.value; updateReport(); });
+  on('#rp-reason', e => { rep.reason = e.target.value; updateReport(); });
+  updateReport();
+}
+
 /* ======================================================= events */
 document.addEventListener('click', ev => {
   const t = ev.target.closest('[data-act]'); if (!t) { if (ev.target.id === 'overlay') closePicker(); return; }
@@ -496,6 +568,16 @@ document.addEventListener('click', ev => {
     }
     case 'openshared': ev.preventDefault(); openShareDialog(); break;
     case 'closeov': closePicker(); break;
+    case 'report': ev.stopPropagation(); openReport(t.dataset.o === undefined ? 0 : +t.dataset.o); break;
+    case 'rp-mode': rep.mode = t.dataset.m; renderReport(); break;
+    case 'rp-open': window.open(reportUrl(), '_blank', 'noopener'); break;
+    case 'rp-copy': {
+      const r = reportText(), txt = r.title + '\n\n' + r.body, label = t.textContent;
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(
+        () => { t.textContent = 'Copied'; setTimeout(() => t.textContent = label, 1400); },
+        () => { prompt('Copy this report:', txt); });
+      break;
+    }
     case 'doimport': {
       const r = parseShared($('#sc').value);
       if (!r.data) { $('#serr').textContent = r.error; break; }
